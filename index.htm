@@ -1,0 +1,304 @@
+<html>
+<head>
+<title>FotoPhrame</title>
+<style>
+body, div, img
+{
+    margin:  0px 0px 0px 0px;
+    padding: 0px 0px 0px 0px;
+}
+
+body
+{
+    background-color: #000;
+}
+
+.main_img_div
+{
+    width:  100%;
+    height: 100%;
+}
+
+img
+{
+    width:           100%;
+    height:          100%;
+    object-fit:      contain;
+    object-position: center center;
+}
+</style>
+<script src="js/jquery-3.6.0.min.js"></script>
+<script>
+
+const fade_in_time  = 3000;
+const fade_out_time = 3000;
+const delay_time    = 30000;
+
+var file_list   = [];
+var imghistory  = [];
+var history_idx = 0;
+var active_img  = null;
+var next_img = null;
+var next_img_name = "";
+var is_fading_out = false;
+var is_fading_in = false;
+var next_timeout = null;
+var cmd_queue = null;
+
+function start()
+{
+    console.log("start");
+    document.onkeydown = function(e) {
+        switch(e.which) {
+            case 37: // left
+                if (is_fading_in == false && is_fading_out == false) {
+                    if (next_timeout != null) {
+                        clearTimeout(next_timeout);
+                        next_timeout = null;
+                    }
+                    console.log("key handle left immediate");
+                    change_image(get_prev_file());
+                }
+                else {
+                    console.log("key handle left queued");
+                    cmd_queue = "left";
+                }
+            break;
+
+            case 39: // right
+                if (is_fading_in == false && is_fading_out == false) {
+                    if (next_timeout != null) {
+                        clearTimeout(next_timeout);
+                        next_timeout = null;
+                    }
+                    console.log("key handle right immediate");
+                    change_image(get_next_file(false));
+                }
+                else {
+                    console.log("key handle right queued");
+                    cmd_queue = "right";
+                }
+            break;
+
+            default: return; // exit this handler for other keys
+        }
+        e.preventDefault(); // prevent the default action (scroll / move caret)
+    };
+
+    if (file_list.length <= 0) {
+        load_file_list();
+        setTimeout(() => {
+            start();
+        }, 500);
+        return;
+    }
+    console.log("file list loaded");
+    change_image(get_next_file(true));
+}
+
+function change_image(new_file)
+{
+    next_img_name = new_file;
+    if (active_img != null && is_fading_out == false) {
+        console.log("fade-out start");
+        is_fading_out = true;
+        active_img.fadeOut(fade_out_time, function() {
+            console.log("fade-out done");
+            active_img.remove();
+            active_img = null;
+            is_fading_out = false;
+        });
+    }
+    if (next_img_name.length <= 0) {
+        console.log("ERROR: new image name is blank");
+        next_timeout = setTimeout(() => {
+            next_timeout = null;
+            if (execute_cmd_queue() == false) {
+                change_image(get_next_file(true));
+            }
+        }, 1000);
+        return;
+    }
+    next_img = new Image();
+    next_img.style = "display: none;";
+    next_img.onload = function() {
+        console.log("image loaded");
+        start_fade_in();
+    };
+    next_img.onerror = function() {
+        console.log("ERROR: image failed to load: " + next_img_name);
+        file_list = file_list.filter(x => x != next_img_name);
+        remove_from_history(next_img_name);
+        if (execute_cmd_queue() == false) {
+            change_image(get_next_file(true));
+        }
+    };
+    next_img.src = next_img_name + "?i=i";
+}
+
+function start_fade_in()
+{
+    if (is_fading_out) {
+        setTimeout(() => { start_fade_in(); }, 100);
+        return;
+    }
+    console.log("fade-in start");
+    var divele = $("#main_img_div");
+    divele.append(next_img);
+    active_img = $(next_img);
+    is_fading_in = true;
+    active_img.fadeIn(fade_in_time, function() {
+        console.log("fade-in done");
+        is_fading_in = false;
+        if (execute_cmd_queue() == false) {
+            next_timeout = setTimeout(() => {
+                next_timeout = null;
+                console.log("YAY: time for next image");
+                change_image(get_next_file(true));
+            }, delay_time);
+        }
+    });
+}
+
+function load_file_list()
+{
+    $.ajax({
+        url: "ls",
+        success: function(html) {
+            var next_time = 1;
+            new_list = html.split(';');
+            new_list = new_list.filter(x => x != "");
+            if (new_list.length > 0) {
+                if (file_list.length != new_list.length) {
+                    console.log("file list length has changed");
+                    console.log(new_list);
+                }
+                file_list = new_list;
+                next_time = 5000;
+            }
+            setTimeout(() => {
+                load_file_list();
+            }, next_time);
+        },
+        error: function(jqXHR, textStatus, errorThrown) {
+            console.log("file list failed to load: " + textStatus + " ; " + errorThrown);
+            setTimeout(() => {
+                load_file_list();
+            }, 1);
+        },
+        cache: false
+    });
+}
+
+function get_next_file(force_new)
+{
+    if (force_new) {
+        while (history_idx >= 0 && history_idx < (imghistory.length - 1)) {
+            imghistory.pop();
+        }
+    }
+    else
+    {
+        while (history_idx >= 0 && history_idx < (imghistory.length - 1)) {
+            var fp = imghistory[history_idx + 1];
+            if (file_list.includes(fp)) {
+                return fp;
+            }
+            else {
+                imghistory.splice(history_idx + 1, 1);
+            }
+        }
+    }
+    var flist = file_list;
+    if (flist.length <= 0) {
+        return "";
+    }
+    var fp = "";
+    var rndlim = Math.round((Math.max(5, flist.length)) / 3.5)
+    while (fp.length <= 0)
+    {
+        var repeat = false;
+        var r = Math.floor(Math.random() * (flist.length - 1));
+        var x = flist[r];
+        var i = imghistory.length;
+        if (i < 0) {
+            fp = x;
+            break;
+        }
+        for (var j = 0; i >= 0 && j <= rndlim && repeat == false; i-= 1, j += 1) {
+            if (imghistory[i] == x) {
+                repeat = true;
+            }
+            if (repeat == false) {
+                fp = x;
+            }
+        }
+    }
+    remove_from_history(fp);
+    imghistory.push(fp);
+    history_idx = imghistory.length - 1;
+    return fp;
+}
+
+function get_prev_file()
+{
+    while (imghistory.length > 0) {
+        if (history_idx <= 0) {
+            return get_next_file(false);
+        }
+        history_idx -= 1;
+        if (history_idx < imghistory.length) {
+            var fp = imghistory[history_idx];
+            var flist = file_list;
+            if (flist.includes(fp)) {
+                return fp;
+            }
+            else {
+                remove_from_history(fp);
+            }
+        }
+    }
+    return get_next_file(false);
+}
+
+function remove_from_history(fp)
+{
+    while (imghistory.includes(fp)) {
+        var rmv = imghistory.indexOf(fp);
+        if (rmv < history_idx) {
+            history_idx -= 1;
+        }
+        imghistory.splice(rmv, 1);
+    }
+}
+
+function execute_cmd_queue()
+{
+    if (cmd_queue == null) {
+        return false;
+    }
+    if (next_timeout != null) {
+        clearTimeout(next_timeout);
+        next_timeout = null;
+    }
+    if (cmd_queue == "left") {
+        console.log("exe queued cmd " + cmd_queue);
+        change_image(get_prev_file());
+        return true;
+    }
+    else if (cmd_queue == "right") {
+        console.log("exe queued cmd " + cmd_queue);
+        change_image(get_next_file(false));
+        return true;
+    }
+}
+
+console.log("hello");
+$(document).ready(start);
+
+</script>
+</head>
+<body>
+<div id="main_img_div" class="main_img_div"></div>
+</body>
+</html>
