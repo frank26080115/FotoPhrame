@@ -9,10 +9,10 @@ from PIL import Image, ImageDraw, ImageFilter
 from screeninfo import get_monitors
 
 import myutils
-import prerender
+import prerender, clock_draw
 import hdmi_ctrl
 
-FRAME_INTERVAL = 45
+FRAME_INTERVAL = 120
 
 FADE_ALPHA_STEP  = 1
 FADE_ALPHA_LIMIT = 9
@@ -28,7 +28,7 @@ class FadeState(Enum):
 
 class FotoPhrame(object):
 
-    def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = True):
+    def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = False):
         os.environ['DISPLAY'] = ":0.0"
         subprocess.Popen(['unclutter', '-idle', '3'])
         hdmi_ctrl.force_on()
@@ -38,10 +38,7 @@ class FotoPhrame(object):
         self.text_min_height = int(round(float(self.screen_height) / float(12)))
         self.screen_aspect = float(self.screen_width) / float(self.screen_height)
         print("window %u x %u aspect %.4f" % (self.screen_width, self.screen_height, self.screen_aspect))
-        self.blank_img = Image.new('RGBA', (self.screen_width, self.screen_height))
-        self.blank_img_small = Image.new('RGBA', (int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
-        self.blank_img.putalpha(255)
-        self.blank_img_small.putalpha(255)
+        self.regen_blanks()
         self.wndname = 'frame'
         cv2.namedWindow      (self.wndname, cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty(self.wndname, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -53,22 +50,30 @@ class FotoPhrame(object):
         self.enable_blur_border = enable_blur_border
         self.stay_on = stay_on
 
+        self.edit_mode  = False
         self.fade_state = FadeState.Idle
         self.fade_alpha = 0
         self.prev_frame_time = datetime.datetime.now()
         self.prev_activity_time = datetime.datetime.now()
         self.history = []
         self.history_idx = -1
-        self.img = self.blank_img.copy()
-        self.img_small = self.blank_img_small.copy()
         self.is_blank = True
         self.prerenderer = prerender.PreRenderer(self)
         self.prerenderer.start()
-        print("waiting for pre-renderer to generate first fade")
+        print("waiting for pre-renderer to generate first fade, while clock fonts are loading")
+        self.clock_draw = clock_draw.ClockDraw(self)
         while not self.prerenderer.all_ready:
             self.handle_key(cv2.waitKey(1), all = False)
         self.prerenderer.show_new()
         print("init complete")
+
+    def regen_blanks(self):
+        self.blank_img = Image.new('RGB', (self.screen_width, self.screen_height))
+        self.blank_img_small = Image.new('RGB', (int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
+        self.blank_img.putalpha(255)
+        self.blank_img_small.putalpha(255)
+        self.img = self.blank_img.copy()
+        self.img_small = self.blank_img_small.copy()
 
     def keyhdl_left(self):
         print("key-press left")
@@ -111,6 +116,22 @@ class FotoPhrame(object):
             self.keyhdl_up()
         elif key == 0x54:
             print('key-press down')
+        elif key == 0x65:
+            print('E key, edit mode')
+            if self.edit_mode == False:
+                cv2.setMouseCallback(self.wndname, mouse_clicked)
+            self.edit_mode = True
+        elif (key == 0x2D or key == 0x2B or key == 0x66) and self.edit_mode:
+            self.prev_frame_time = datetime.datetime.now()
+            if key == 0x2D:
+                print("clock edit corner")
+                self.clock_draw.change_corner()
+            elif key == 0x2B:
+                print("clock edit size")
+                self.clock_draw.change_size()
+            elif key == 0x66:
+                print("clock edit font")
+                self.clock_draw.change_font()
         else:
             print('key-press unknown 0x%08X' % key)
             return
@@ -154,7 +175,13 @@ class FotoPhrame(object):
         if img is None:
             img = self.blank_img.copy()
         if 'PIL' in str(type(img)):
-            img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            try:
+                nimg = np.array(img)
+            except MemoryError:
+                print("MemoryError in get_faded_img")
+                nimg = np.array((0, 0, 0, 0))
+                self.regen_blanks()
+            img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
         if alpha is not None:
             if alpha >= FADE_ALPHA_LIMIT:
                 alpha = 1
@@ -173,7 +200,14 @@ class FotoPhrame(object):
         alpha = int(round(alpha))
         if img is None:
             img = self.img_small
-        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        if 'PIL' in str(type(img)):
+            try:
+                nimg = np.array(img)
+            except MemoryError:
+                print("MemoryError in get_faded_img")
+                nimg = np.array((0, 0, 0, 0))
+                self.regen_blanks()
+        img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
         if alpha >= FADE_ALPHA_LIMIT:
             alpha = 1
         else:
@@ -187,6 +221,8 @@ class FotoPhrame(object):
     def draw_clock(self, img = None):
         if img is None:
             img = self.img
+        img = img.copy()
+        self.clock_draw.draw(img)
         return img
 
     def load_img_file(self, fp):
@@ -226,6 +262,13 @@ class FotoPhrame(object):
         img_small = bg.resize((int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
         return bg, img_small, True
 
+    def curr_file_path(self):
+        if self.history_idx < 0:
+            return None
+        while self.history_idx >= len(self.history):
+            self.history_idx -= 1
+        return self.history[self.history_idx]
+
     def peek_next_file(self):
         if self.history_idx + 1 <= (len(self.history) - 1):
             fp = self.history[self.history_idx + 1]
@@ -237,6 +280,15 @@ class FotoPhrame(object):
         if len(allfiles) <= 0:
             print("no files found")
             return None # self.load_img_file(None)
+
+        if self.edit_mode:
+            allfiles2 = []
+            for i in allfiles:
+                if os.path.exists(i) and not os.path.exists(i + clock_draw.CLOCKPOS_FILE_SUFFIX):
+                    allfiles2.append(i)
+            if len(allfiles2) > 0:
+                allfiles = allfiles2
+
         rndlim = int(round(max(5, len(allfiles)) / 3))
         print("files count %u" % len(allfiles))
         fp = None
@@ -252,10 +304,10 @@ class FotoPhrame(object):
             while i >= 0 and j <= rndlim and repeat == False:
                 if self.history[i].lower() == x.lower():
                     repeat = True
-                if not repeat:
-                    fp = x
                 i -= 1
                 j += 1
+            if not repeat:
+                fp = x
         return fp
 
     def peek_prev_file(self):
@@ -320,12 +372,13 @@ class FotoPhrame(object):
             self.history.pop(rmv)
 
     def prerender_fade_done(self, img, img_small):
-        self.fade_alpha = FADE_ALPHA_LIMIT
-        self.fade_state = FadeState.Idle
+        self.fade_alpha      = FADE_ALPHA_LIMIT
+        self.fade_state      = FadeState.Idle
         self.prev_frame_time = datetime.datetime.now()
-        self.img       = img       if img       is not None else self.img
-        self.img_small = img_small if img_small is not None else self.img_small
-        self.is_blank = False
+        self.img             = img       if img       is not None else self.img
+        self.img_small       = img_small if img_small is not None else self.img_small
+        self.is_blank        = False
+        self.clock_draw.new_img(self.curr_file_path())
 
     def tick(self):
         now = datetime.datetime.now()
@@ -375,12 +428,13 @@ class FotoPhrame(object):
                     self.img, self.img_small, ret = self.get_next_file(True if self.fade_state == FadeState.FadeOutNew else False)
                     self.is_blank = not ret
                 self.fade_state = FadeState.FadeIn
+                self.clock_draw.new_img(self.curr_file_path())
                 print("start fade in")
         elif self.fade_state == FadeState.Idle:
             gc.collect()
             span = now - self.prev_frame_time
             if span.total_seconds() >= FRAME_INTERVAL and self.prerenderer.all_ready:
-                if self.stay_on:
+                if self.stay_on and self.edit_mode == False:
                     hdmi_ctrl.force_on()
                 print("time for new photo")
                 if self.prerenderer.new_ready:
@@ -393,9 +447,10 @@ class FotoPhrame(object):
                 self.new_photo()
             else:
                 img = self.draw_clock()
-                self.show_img(img, wait = 500)
+                self.show_img(img, wait = 500 if not self.edit_mode else 10)
             if hdmi_ctrl.is_monitor_on() == False:
                 print("monitor turned off")
+                gc.collect()
                 self.show_img(self.blank_img, wait = 100)
                 self.fade_alpha = 0
                 self.fade_state = FadeState.MonitorOff
@@ -435,7 +490,16 @@ class FotoPhrame(object):
                     print("\nquitting from KeyboardInterrupt")
                     sys.exit()
 
+root = None
+
+def mouse_clicked(event, x, y, flags, param):
+    global root
+    if event == cv2.EVENT_LBUTTONDBLCLK:
+        print("dbl-click event (%u , %u)" % (x, y))
+        root.clock_draw.change_xy(x, y)
+
 def main():
+    global root
     root = FotoPhrame()
     root.main_loop()
     return 0

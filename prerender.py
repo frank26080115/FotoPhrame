@@ -15,11 +15,12 @@ class PreRenderer(object):
 
     def __init__(self, parent):
         self.parent = parent
-        self.prev_ready = False
-        self.next_ready = False
-        self.new_ready  = False
-        self.wake_ready = False
-        self.all_ready  = False
+        self.prev_ready  = False
+        self.next_ready  = False
+        self.new_ready   = False
+        self.wake_ready  = False
+        self.all_ready   = False
+        self.next_is_new = False
         self.stop_event = threading.Event()
         self.t = None
         self.pilimg_this = None
@@ -35,17 +36,25 @@ class PreRenderer(object):
         self.parent.remove_file_from_history(fp)
         self.parent.history.append(fp)
         self.parent.history_idx = len(self.parent.history) - 1
+        #print("pre-renderer shoved in file \"%s\"" % fp)
 
     def history_roll_next_file(self):
-        while self.parent.history_idx >= 0 and self.parent.history_idx < (len(self.parent.history) - 1):
-            fp = self.parent.history[self.parent.history_idx + 1];
-            if os.path.exists(fp):
-                print("fwd file %s" % fp, flush=True)
-                self.parent.history_idx += 1
-                return fp
+        fi = self.parent.history_idx + 1
+        while True:
+            fi = self.parent.history_idx + 1
+            if fi < len(self.parent.history):
+                fp = self.parent.history[fi]
+                if os.path.exists(fp):
+                    print("pre-renderer fwd file %s" % fp, flush=True)
+                    self.parent.history_idx = fi
+                    return
+                else:
+                    print("pre-renderer fwd file %s missing" % fp, flush=True)
+                    self.parent.history.pop(fi)
             else:
-                self.parent.history.pop(self.parent.history_idx + 1)
-        return None
+                print("pre-renderer fwd file failed", flush=True)
+                break
+        self.parent.history_idx = len(self.parent.history) - 1
 
     def history_roll_prev_file(self):
         while len(self.parent.history) > 0:
@@ -55,11 +64,10 @@ class PreRenderer(object):
             if self.parent.history_idx < len(self.parent.history):
                 fp = self.parent.history[self.parent.history_idx]
                 if os.path.exists(fp):
-                    return fp
+                    return
                 else:
                     print("prev file missing from filesystem %s" % fp, flush=True)
                     self.parent.remove_file_from_history(fp)
-        return None
 
     def show_wake(self):
         for i in self.wake_buffer:
@@ -73,7 +81,7 @@ class PreRenderer(object):
         self.prev_ready = False
         self.wake_ready = False
         self.all_ready  = False
-        for i in self.forward_buffer:
+        for i in self.future_buffer:
             cv2.imshow(self.parent.wndname, i)
             self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
         self.history_add_new_file(self.new_fp)
@@ -90,7 +98,10 @@ class PreRenderer(object):
         for i in self.forward_buffer:
             cv2.imshow(self.parent.wndname, i)
             self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
-        self.history_roll_next_file()
+        if self.next_is_new:
+            self.history_add_new_file(self.new_fp)
+        else:
+            self.history_roll_next_file()
         self.parent.prerender_fade_done(self.pilimg_next, self.pilimg_next_small)
         if autostart:
             self.start()
@@ -135,9 +146,9 @@ class PreRenderer(object):
         self.next_ready = False
         self.prev_ready = False
         self.wake_ready = False
+        gc.collect()
         if self.t is not None:
             self.stop_event.set()
-            gc.collect()
             if self.t.is_alive():
                 print("waiting for pre-renderer thread to end", flush=True)
                 self.t.join()
@@ -199,6 +210,7 @@ class PreRenderer(object):
 
         if self.parent.history_idx >= (len(self.parent.history) - 1):
             print("pre-renderer re-using new file fade for next file fade", flush=True)
+            self.next_is_new       = True
             self.pilimg_next       = self.pilimg_new
             self.pilimg_next_small = self.pilimg_new_small
             for i in self.future_buffer:
@@ -210,6 +222,7 @@ class PreRenderer(object):
                 return
             self.next_ready = True
         else:
+            self.next_is_new = False
             self.next_fp = self.parent.peek_next_file()
             print("pre-renderer loading next file \"%s\"" % self.next_fp, flush=True)
             img_next, img_next_small, ret = self.parent.load_img_file(self.next_fp)

@@ -13,6 +13,6 @@ def is_monitor_on():
         print("unable to parse monitor status")
         return True
     s = s.lower()
-    if "monitor is off" in s:
+    if "monitor is off" in s or "monitor is susp" in s:
         return False
     return True
