@@ -12,7 +12,9 @@ import myutils
 import prerender, clock_draw
 import hdmi_ctrl
 
+# time between photos
 FRAME_INTERVAL = 120
+
 
 FADE_ALPHA_STEP  = 1
 FADE_ALPHA_LIMIT = 9
@@ -28,14 +30,15 @@ class FadeState(Enum):
 
 class FotoPhrame(object):
 
-    def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = True):
-        os.environ['DISPLAY'] = ":0.0"
-        hdmi_ctrl.hide_mouse()
-        hdmi_ctrl.force_on()
+    def __init__(self, dirpath = './Pictures', enable_blur_border = 0.6, stay_on = False):
+        os.environ['DISPLAY'] = ":0.0" # required for launching a window out of a SSH session
+        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self)
+        self.hdmi_ctrler.hide_mouse()
+        self.hdmi_ctrler.force_on()
+        self.hdmi_ctrler.set_timer()
         screen = get_monitors()[0]
         self.screen_width  = screen.width
         self.screen_height = screen.height
-        self.text_min_height = int(round(float(self.screen_height) / float(12)))
         self.screen_aspect = float(self.screen_width) / float(self.screen_height)
         print("window %u x %u aspect %.4f" % (self.screen_width, self.screen_height, self.screen_aspect))
         self.regen_blanks()
@@ -43,7 +46,7 @@ class FotoPhrame(object):
         cv2.namedWindow      (self.wndname, cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty(self.wndname, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
         cv2.imshow           (self.wndname, np.array(self.blank_img))
-        #cv2.setWindowProperty(self.wndname, cv2.WND_PROP_TOPMOST, 1)
+        #cv2.setWindowProperty(self.wndname, cv2.WND_PROP_TOPMOST, 1) # the version of OpenCV I have doesn't support this
         cv2.waitKey(1)
         print("window launched")
 
@@ -60,6 +63,10 @@ class FotoPhrame(object):
         self.history = []
         self.history_idx = -1
         self.is_blank = True
+
+        # even though we already called imshow, it takes quite a bit of time for the window to take over the screen
+        # we use this time to do useful things
+
         self.prerenderer = prerender.PreRenderer(self)
         self.prerenderer.start()
         print("waiting for pre-renderer to generate first fade, while clock fonts are loading")
@@ -70,11 +77,13 @@ class FotoPhrame(object):
         print("init complete")
 
     def regen_blanks(self):
-        self.blank_img = Image.new('RGB', (self.screen_width, self.screen_height))
-        self.blank_img_small = Image.new('RGB', (int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
+        # this function exists just in case of a MemoryError
+        # truthfully, investigation shows that this doesn't help
+        self.blank_img = Image.new('RGBA', (self.screen_width, self.screen_height))
+        self.blank_img_small = Image.new('RGBA', (int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
         self.blank_img.putalpha(255)
         self.blank_img_small.putalpha(255)
-        self.blank_tiny = np.zeros([9,16,3], dtype=np.uint8)
+        self.blank_tiny = np.zeros([9,16,4], dtype=np.uint8)
         self.img = self.blank_img.copy()
         self.img_small = self.blank_img_small.copy()
 
@@ -97,9 +106,8 @@ class FotoPhrame(object):
         self.wake_up()
 
     def wake_up(self):
-        hdmi_ctrl.force_on()
-        hdmi_ctrl.hide_mouse()
-        if self.fade_state == FadeState.MonitorOff:
+        self.hdmi_ctrler.poke(force = True)
+        if self.fade_state == FadeState.MonitorOff: # prevent repetition
             if self.prerenderer.wake_ready:
                 print("pre-rendered wake")
                 self.prerenderer.show_wake()
@@ -126,7 +134,7 @@ class FotoPhrame(object):
         if interrupt:
             return True
         if self.stay_on == False:
-            hdmi_ctrl.force_on()
+            self.hdmi_ctrler.poke(force = True)
         if key == 0x51:
             self.keyhdl_left()
         elif key == 0x53:
@@ -215,8 +223,8 @@ class FotoPhrame(object):
                 print("MemoryError in show_img")
                 gc.collect()
                 self.regen_blanks()
-                nimg = np.zeros([1,1,3], dtype=np.uint8)
-            img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
+                nimg = self.blank_tiny
+            img = cv2.cvtColor(nimg, cv2.COLOR_RGBA2BGR)
         if alpha is not None:
             if alpha >= FADE_ALPHA_LIMIT:
                 alpha = 1
@@ -225,7 +233,7 @@ class FotoPhrame(object):
             if alpha > 1:
                 img = cv2.divide(img, (alpha, alpha, alpha, alpha))
             elif alpha == 0:
-                img = np.zeros([1,1,3], dtype=np.uint8)
+                img = self.blank_tiny
         cv2.imshow(self.wndname, img)
         self.handle_key(cv2.waitKey(wait))
 
@@ -242,8 +250,8 @@ class FotoPhrame(object):
                 print("MemoryError in get_faded_img")
                 gc.collect()
                 self.regen_blanks()
-                nimg = np.zeros([1,1,3], dtype=np.uint8)
-        img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
+                nimg = self.blank_tiny
+        img = cv2.cvtColor(nimg, cv2.COLOR_RGBA2BGR)
         if alpha >= FADE_ALPHA_LIMIT:
             alpha = 1
         else:
@@ -251,7 +259,7 @@ class FotoPhrame(object):
         if alpha > 1:
             img = cv2.divide(img, (alpha, alpha, alpha, alpha))
         elif alpha == 0:
-            img = np.zeros([1,1,3], dtype=np.uint8)
+            img = self.blank_tiny
         return img
 
     def draw_clock(self, img = None):
@@ -272,28 +280,32 @@ class FotoPhrame(object):
             return bg, False
         img_aspect = float(img.width) / float(img.height);
         print('img open "%s" (%u , %u , %.4f)' % (fp, img.width, img.height, img_aspect))
+        # resize image to fit the screen while respecting aspect ratio
+        # I am avoiding the usage of the thumbnail function
         if img_aspect >= self.screen_aspect:
             wpercent = float(self.screen_width) / float(img.width)
             dstheight = float(img.height) * wpercent
             topoffset = int(round(float(self.screen_height - dstheight) / float(2)))
             img = img.resize((self.screen_width, int(round(dstheight))))
             pos = (0, topoffset)
-            if self.enable_blur_border and topoffset < int(round(dstheight / float(3))):
+            if self.enable_blur_border > 0 and topoffset < int(round(dstheight / float(3))):
                 bg.paste(img, (0, 0))
                 bg.paste(img, (0, bg.height - img.height))
                 bg = bg.filter(ImageFilter.GaussianBlur(20))
-                bg.putalpha(64 * 3)
+                #bg.putalpha(64 * 3)
+                bg = bg.point(lambda p: p * self.enable_blur_border)
         else:
             hpercent = float(self.screen_height) / float(img.height)
             dstwidth = float(img.width) * hpercent
             leftoffset = int(round(float(self.screen_width - dstwidth) / float(2)))
             img = img.resize((int(round(dstwidth)), self.screen_height))
             pos = (leftoffset, 0)
-            if self.enable_blur_border and leftoffset < int(round(dstwidth / float(3))):
+            if self.enable_blur_border > 0 and leftoffset < int(round(dstwidth / float(3))):
                 bg.paste(img, (0                   , 0))
                 bg.paste(img, (bg.width - img.width, 0))
                 bg = bg.filter(ImageFilter.GaussianBlur(20))
-                bg.putalpha(64 * 3)
+                #bg.putalpha(64 * 3)
+                bg = bg.point(lambda p: p * self.enable_blur_border)
         bg.paste(img, pos)
         img_small = bg.resize((int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
         return bg, img_small, True
@@ -317,6 +329,7 @@ class FotoPhrame(object):
             print("no files found")
             return None # self.load_img_file(None)
 
+        # if we are editing the clock position, then try to show only images without set clock positions
         if self.edit_mode:
             allfiles2 = []
             for i in allfiles:
@@ -329,6 +342,8 @@ class FotoPhrame(object):
         print("files count %u" % len(allfiles))
         fp = None
         while fp is None:
+            # pick a random file out of the list
+            # check if it was recently displayed
             repeat = False
             r = random.randint(0, len(allfiles) - 1)
             x = os.path.abspath(allfiles[r])
@@ -471,7 +486,7 @@ class FotoPhrame(object):
             span = now - self.prev_frame_time
             if span.total_seconds() >= FRAME_INTERVAL and self.prerenderer.all_ready:
                 if self.stay_on and self.edit_mode == False:
-                    hdmi_ctrl.force_on()
+                    self.hdmi_ctrler.poke()
                 print("time for new photo")
                 if self.prerenderer.new_ready:
                     print("pre-rendered new fade")
@@ -484,7 +499,7 @@ class FotoPhrame(object):
             else:
                 img = self.draw_clock()
                 self.show_img(img, wait = 500 if not self.edit_mode else 10)
-            if hdmi_ctrl.is_monitor_on() == False:
+            if self.hdmi_ctrler.is_monitor_on() == False:
                 print("monitor turned off")
                 gc.collect()
                 self.show_img(self.blank_tiny, wait = 100)
@@ -492,7 +507,7 @@ class FotoPhrame(object):
                 self.fade_state = FadeState.MonitorOff
         elif self.fade_state == FadeState.MonitorOff:
             self.show_img(self.blank_tiny, wait = 100)
-            if hdmi_ctrl.is_monitor_on():
+            if self.hdmi_ctrler.is_monitor_on():
                 print("monitor turned on")
                 if self.fade_state == FadeState.MonitorOff:
                     self.wake_up()

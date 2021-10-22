@@ -149,7 +149,7 @@ class PreRenderer(object):
             else:
                 res = Image.blend(img1_small, img2_small, alpha=alpha)
                 #res = Image.blend(img1_big, img2_big, alpha=alpha)
-            res = cv2.cvtColor(np.array(res, dtype=np.uint8), cv2.COLOR_RGB2BGR)
+            res = cv2.cvtColor(np.array(res, dtype=np.uint8), cv2.COLOR_RGBA2BGR)
             buff.append(res)
             alpha += ALPHA_STEP
         return buff
