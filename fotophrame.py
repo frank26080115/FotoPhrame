@@ -97,13 +97,15 @@ class FotoPhrame(object):
         self.wake_up()
 
     def wake_up(self):
+        hdmi_ctrl.force_on()
         hdmi_ctrl.hide_mouse()
-        if self.prerenderer.wake_ready:
-            print("pre-rendered wake")
-            self.prerenderer.show_wake()
-        else:
-            self.fade_alpha = 0
-            self.fade_state = FadeState.FadeIn
+        if self.fade_state == FadeState.MonitorOff:
+            if self.prerenderer.wake_ready:
+                print("pre-rendered wake")
+                self.prerenderer.show_wake()
+            else:
+                self.fade_alpha = 0
+                self.fade_state = FadeState.FadeIn
 
     def handle_key(self, key, all = True, interrupt = False):
         if key is None:

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Encoding=UTF-8
+Type=Application
+Name=FotoPhrame
+Exec=/home/pi/FotoPhrame/fotophrame.py
+Path=/home/pi/FotoPhrame
+Terminal=false
+StartupNotify=true
