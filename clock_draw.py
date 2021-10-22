@@ -14,7 +14,7 @@ class ClockDraw(object):
         self.fontpairs.append(make_font_fit("./fonts/corsiva.ttf", mainsize = 300, maxheight = 300, datescale = 0.4, linespace = 0.15, margin = 6))
         self.fontpairs.append(make_font_fit("./fonts/corsiva.ttf", datescale = 0))
         self.fontpairs.append(make_font_fit("./fonts/corsiva.ttf", mainsize = 300, maxheight = 300, datescale = 0, margin = 6))
-        self.cur_pos        = [0, 0, 0, 0]
+        self.cur_pos        = [0, 0, 0, 0, 0]
         self.cur_imgfp      = None
 
     def new_img(self, imgfp):
@@ -26,12 +26,12 @@ class ClockDraw(object):
         fi = self.cur_pos[3]
         fi %= len(self.fontpairs)
         fontpair = self.fontpairs[fi]
-        draw_clock(img, (self.cur_pos[0], self.cur_pos[1]), fontpair[0], fontpair[1], linespace = fontpair[2], placecode = self.cur_pos[2])
+        draw_clock(img, (self.cur_pos[0], self.cur_pos[1]), fontpair[0], fontpair[1], linespace = fontpair[2], placecode = self.cur_pos[2], shadowoffset = self.cur_pos[4])
 
     def save_spec(self):
         fpath = self.cur_imgfp + CLOCKPOS_FILE_SUFFIX
         with open(fpath, "w") as f:
-            s = "%u %u %u %u" % (self.cur_pos[0], self.cur_pos[1], self.cur_pos[2], self.cur_pos[3])
+            s = "%u %u %u %u %u" % (self.cur_pos[0], self.cur_pos[1], self.cur_pos[2], self.cur_pos[3], self.cur_pos[4])
             f.write(s + '\n')
             print("wrote \"%s\" to file \"%s\"" % (s, fpath))
 
@@ -72,6 +72,12 @@ class ClockDraw(object):
         self.cur_pos[3] = (self.cur_pos[3] + 1) % len(self.fontpairs)
         self.save_spec()
 
+    def change_shadow(self):
+        self.cur_pos[4] -= self.cur_pos[4] % 4
+        self.cur_pos[4] += 4
+        self.cur_pos[4] %= 16
+        self.save_spec()
+
 def load_fonts(dirpath = "./fonts"):
     fontfiles = myutils.get_all_files("./fonts", ["*.ttf"])
     fontresults = []
@@ -105,7 +111,7 @@ def make_font_fit(fontfp, mainsize = 500, maxheight = 500, datescale = 0.3, line
 
     return ImageFont.load_default(), ImageFont.load_default() if datescale > 0 else None, 0
 
-def draw_clock(img, pos, fontbig, fontsmall, linespace = 0, t = None, placecode = 7, forecolour = (255, 255, 255), border = 2, border2 = 2, shadow = (0, 0, 0)):
+def draw_clock(img, pos, fontbig, fontsmall, linespace = 0, t = None, placecode = 7, forecolour = (255, 255, 255), border = 2, border2 = 2, bordercolour = (0, 0, 0), shadowoffset = 0, shadowcolour = (0, 0, 0)):
     if t is None:
         t = datetime.datetime.now()
     tstr = t.strftime("%I:%M").lstrip('0')
@@ -166,9 +172,13 @@ def draw_clock(img, pos, fontbig, fontsmall, linespace = 0, t = None, placecode 
         y_pos_1 = pos[1] - total_height
     y_pos_2 = y_pos_1 + linespace + time_height
 
-    draw.text((x_pos_1, y_pos_1), tstr, font=fontbig, fill=forecolour, stroke_width=border, stroke_fill=shadow)
+    if shadowoffset > 0:
+        draw.text((x_pos_1 + shadowoffset, y_pos_1 + shadowoffset), tstr, font=fontbig, fill=shadowcolour)
+    draw.text((x_pos_1, y_pos_1), tstr, font=fontbig, fill=forecolour, stroke_width=border, stroke_fill=bordercolour)
     if dstr is not None and fontsmall is not None:
-        draw.text((x_pos_2, y_pos_2), dstr, font=fontsmall, fill=forecolour, stroke_width=border2, stroke_fill=shadow)
+        if shadowoffset > 0:
+            draw.text((x_pos_2 + shadowoffset, y_pos_2 + shadowoffset), dstr, font=fontsmall, fill=shadowcolour)
+        draw.text((x_pos_2, y_pos_2), dstr, font=fontsmall, fill=forecolour, stroke_width=border2, stroke_fill=bordercolour)
 
 def get_clock_pos(imgfp):
     txtfp = imgfp + CLOCKPOS_FILE_SUFFIX
@@ -178,9 +188,10 @@ def get_clock_pos(imgfp):
         nums = line.split(' ')
         pos_x    = int(nums[0])
         pos_y    = int(nums[1])
-        pos_pc   = int(nums[2])
-        pos_fi   = int(nums[3])
-        return [pos_x, pos_y, pos_pc, pos_fi]
+        pos_pc   = int(nums[2]) if len(nums) > 2 else 0
+        pos_fi   = int(nums[3]) if len(nums) > 3 else 0
+        pos_sh   = int(nums[4]) if len(nums) > 4 else 0
+        return [pos_x, pos_y, pos_pc, pos_fi, pos_sh]
     except Exception as ex:
         print("ERROR: unable to parse clock position from \"%s\", ex: %s" % (txtfp, str(ex)))
-        return [0, 0, 0, 0]
+        return [0, 0, 0, 0, 0]

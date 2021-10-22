@@ -16,3 +16,6 @@ def is_monitor_on():
     if "monitor is off" in s or "monitor is susp" in s:
         return False
     return True
+
+def hide_mouse():
+    subprocess.Popen(['unclutter', '-idle', '3'])

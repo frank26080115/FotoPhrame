@@ -30,7 +30,7 @@ class FotoPhrame(object):
 
     def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = False):
         os.environ['DISPLAY'] = ":0.0"
-        subprocess.Popen(['unclutter', '-idle', '3'])
+        hdmi_ctrl.hide_mouse()
         hdmi_ctrl.force_on()
         screen = get_monitors()[0]
         self.screen_width  = screen.width
@@ -72,6 +72,7 @@ class FotoPhrame(object):
         self.blank_img_small = Image.new('RGB', (int(round(self.screen_width / SMALL_IMG_DIV)), int(round(self.screen_height / SMALL_IMG_DIV))))
         self.blank_img.putalpha(255)
         self.blank_img_small.putalpha(255)
+        self.blank_tiny = np.zeros([9,16,3], dtype=np.uint8)
         self.img = self.blank_img.copy()
         self.img_small = self.blank_img_small.copy()
 
@@ -121,7 +122,7 @@ class FotoPhrame(object):
             if self.edit_mode == False:
                 cv2.setMouseCallback(self.wndname, mouse_clicked)
             self.edit_mode = True
-        elif (key == 0x2D or key == 0x2B or key == 0x66) and self.edit_mode:
+        elif (key == 0x2D or key == 0x2B or key == 0x66 or key == 0x73) and self.edit_mode:
             self.prev_frame_time = datetime.datetime.now()
             if key == 0x2D:
                 print("clock edit corner")
@@ -132,6 +133,9 @@ class FotoPhrame(object):
             elif key == 0x66:
                 print("clock edit font")
                 self.clock_draw.change_font()
+            elif key == 0x73:
+                print("clock edit shadow")
+                self.clock_draw.change_shadow()
         else:
             print('key-press unknown 0x%08X' % key)
             return
@@ -178,9 +182,10 @@ class FotoPhrame(object):
             try:
                 nimg = np.array(img)
             except MemoryError:
-                print("MemoryError in get_faded_img")
-                nimg = np.array((0, 0, 0, 0))
+                print("MemoryError in show_img")
+                gc.collect()
                 self.regen_blanks()
+                nimg = np.zeros([1,1,3], dtype=np.uint8)
             img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
         if alpha is not None:
             if alpha >= FADE_ALPHA_LIMIT:
@@ -190,7 +195,7 @@ class FotoPhrame(object):
             if alpha > 1:
                 img = cv2.divide(img, (alpha, alpha, alpha, alpha))
             elif alpha == 0:
-                img = np.array((0, 0, 0, 0))
+                img = np.zeros([1,1,3], dtype=np.uint8)
         cv2.imshow(self.wndname, img)
         self.handle_key(cv2.waitKey(wait))
 
@@ -205,8 +210,9 @@ class FotoPhrame(object):
                 nimg = np.array(img)
             except MemoryError:
                 print("MemoryError in get_faded_img")
-                nimg = np.array((0, 0, 0, 0))
+                gc.collect()
                 self.regen_blanks()
+                nimg = np.zeros([1,1,3], dtype=np.uint8)
         img = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
         if alpha >= FADE_ALPHA_LIMIT:
             alpha = 1
@@ -215,7 +221,7 @@ class FotoPhrame(object):
         if alpha > 1:
             img = cv2.divide(img, (alpha, alpha, alpha, alpha))
         elif alpha == 0:
-            img = np.array((0, 0, 0, 0))
+            img = np.zeros([1,1,3], dtype=np.uint8)
         return img
 
     def draw_clock(self, img = None):
@@ -451,15 +457,16 @@ class FotoPhrame(object):
             if hdmi_ctrl.is_monitor_on() == False:
                 print("monitor turned off")
                 gc.collect()
-                self.show_img(self.blank_img, wait = 100)
+                self.show_img(self.blank_tiny, wait = 100)
                 self.fade_alpha = 0
                 self.fade_state = FadeState.MonitorOff
         elif self.fade_state == FadeState.MonitorOff:
-            self.show_img(self.blank_img, wait = 100)
+            self.show_img(self.blank_tiny, wait = 100)
             if hdmi_ctrl.is_monitor_on():
                 print("monitor turned on")
                 self.fade_alpha = 0
                 self.fade_state = FadeState.FadeIn
+                hdmi_ctrl.hide_mouse()
                 if self.prerenderer.wake_ready:
                     print("pre-rendered wake")
                     self.prerenderer.show_wake()
