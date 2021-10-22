@@ -28,7 +28,7 @@ class FadeState(Enum):
 
 class FotoPhrame(object):
 
-    def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = False):
+    def __init__(self, dirpath = './Pictures', enable_blur_border = True, stay_on = True):
         os.environ['DISPLAY'] = ":0.0"
         hdmi_ctrl.hide_mouse()
         hdmi_ctrl.force_on()
@@ -43,6 +43,7 @@ class FotoPhrame(object):
         cv2.namedWindow      (self.wndname, cv2.WND_PROP_FULLSCREEN)
         cv2.setWindowProperty(self.wndname, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
         cv2.imshow           (self.wndname, np.array(self.blank_img))
+        #cv2.setWindowProperty(self.wndname, cv2.WND_PROP_TOPMOST, 1)
         cv2.waitKey(1)
         print("window launched")
 
@@ -51,6 +52,7 @@ class FotoPhrame(object):
         self.stay_on = stay_on
 
         self.edit_mode  = False
+        self.last_key   = 0
         self.fade_state = FadeState.Idle
         self.fade_alpha = 0
         self.prev_frame_time = datetime.datetime.now()
@@ -78,14 +80,24 @@ class FotoPhrame(object):
 
     def keyhdl_left(self):
         print("key-press left")
-        self.prev_photo()
+        if self.fade_state == FadeState.MonitorOff:
+            self.wake_up()
+        else:
+            self.prev_photo()
 
     def keyhdl_right(self):
         print("key-press right")
-        self.next_photo()
+        if self.fade_state == FadeState.MonitorOff:
+            self.wake_up()
+        else:
+            self.next_photo()
 
     def keyhdl_up(self):
         print("key-press up")
+        self.wake_up()
+
+    def wake_up(self):
+        hdmi_ctrl.hide_mouse()
         if self.prerenderer.wake_ready:
             print("pre-rendered wake")
             self.prerenderer.show_wake()
@@ -93,20 +105,24 @@ class FotoPhrame(object):
             self.fade_alpha = 0
             self.fade_state = FadeState.FadeIn
 
-    def handle_key(self, key, all = True):
+    def handle_key(self, key, all = True, interrupt = False):
         if key is None:
-            return
+            return False
         if key == -1:
-            return
+            return False
         if key == 0xFF:
-            return
+            return False
+        last_key = self.last_key
+        self.last_key = key
         if (key & 0x7F) == 27:
             print('quit using ESC')
             sys.exit()
-            return
+            return True
         self.prev_activity_time = datetime.datetime.now()
         if not all:
-            return
+            return False
+        if interrupt:
+            return True
         if self.stay_on == False:
             hdmi_ctrl.force_on()
         if key == 0x51:
@@ -117,6 +133,9 @@ class FotoPhrame(object):
             self.keyhdl_up()
         elif key == 0x54:
             print('key-press down')
+            if last_key == key:
+                print("toggle IP on image")
+                self.clock_draw.toggle_ip()
         elif key == 0x65:
             print('E key, edit mode')
             if self.edit_mode == False:
@@ -138,7 +157,7 @@ class FotoPhrame(object):
                 self.clock_draw.change_shadow()
         else:
             print('key-press unknown 0x%08X' % key)
-            return
+            return False
 
     def new_photo(self):
         if self.prerenderer.new_ready:
@@ -146,7 +165,10 @@ class FotoPhrame(object):
             self.prerenderer.show_new()
         else:
             self.prerenderer.halt()
-            self.fade_alpha = FADE_ALPHA_LIMIT
+            if self.fade_state == FadeState.FadeIn:
+                self.fade_alpha = FADE_ALPHA_LIMIT
+                return
+            self.fade_alpha = 0 if self.fade_state == FadeState.FadeOutNew else FADE_ALPHA_LIMIT
             self.fade_state = FadeState.FadeOutNew
 
     def next_photo(self):
@@ -155,7 +177,10 @@ class FotoPhrame(object):
             self.prerenderer.show_next()
         else:
             self.prerenderer.halt()
-            self.fade_alpha = FADE_ALPHA_LIMIT
+            if self.fade_state == FadeState.FadeIn:
+                self.fade_alpha = FADE_ALPHA_LIMIT
+                return
+            self.fade_alpha = 0 if self.fade_state == FadeState.FadeOutNext else FADE_ALPHA_LIMIT
             self.fade_state = FadeState.FadeOutNext
 
     def prev_photo(self):
@@ -164,7 +189,10 @@ class FotoPhrame(object):
             self.prerenderer.show_prev()
         else:
             self.prerenderer.halt()
-            self.fade_alpha = FADE_ALPHA_LIMIT
+            if self.fade_state == FadeState.FadeIn:
+                self.fade_alpha = FADE_ALPHA_LIMIT
+                return
+            self.fade_alpha = 0 if self.fade_state == FadeState.FadeOutPrev else FADE_ALPHA_LIMIT
             self.fade_state = FadeState.FadeOutPrev
 
     def error_report(self, err, txt = ''):
@@ -464,14 +492,8 @@ class FotoPhrame(object):
             self.show_img(self.blank_tiny, wait = 100)
             if hdmi_ctrl.is_monitor_on():
                 print("monitor turned on")
-                self.fade_alpha = 0
-                self.fade_state = FadeState.FadeIn
-                hdmi_ctrl.hide_mouse()
-                if self.prerenderer.wake_ready:
-                    print("pre-rendered wake")
-                    self.prerenderer.show_wake()
-                else:
-                    print("slow-render wake")
+                if self.fade_state == FadeState.MonitorOff:
+                    self.wake_up()
         else:
             print("ERROR: unknown fade state %s" % self.fade_state)
             self.fade_state = FadeState.Idle

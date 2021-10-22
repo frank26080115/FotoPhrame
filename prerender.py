@@ -72,7 +72,11 @@ class PreRenderer(object):
     def show_wake(self):
         for i in self.wake_buffer:
             cv2.imshow(self.parent.wndname, i)
-            self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
+            if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
+                print("animation interrupted")
+                cv2.imshow(self.parent.wndname, self.wake_buffer[-1])
+                cv2.waitKey(1)
+                break
         self.parent.prerender_fade_done(self.pilimg_this, self.pilimg_this_small)
 
     def show_new(self, autostart = True):
@@ -83,7 +87,11 @@ class PreRenderer(object):
         self.all_ready  = False
         for i in self.future_buffer:
             cv2.imshow(self.parent.wndname, i)
-            self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
+            if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
+                print("animation interrupted")
+                cv2.imshow(self.parent.wndname, self.future_buffer[-1])
+                cv2.waitKey(1)
+                break
         self.history_add_new_file(self.new_fp)
         self.parent.prerender_fade_done(self.pilimg_new, self.pilimg_new_small)
         if autostart:
@@ -97,7 +105,11 @@ class PreRenderer(object):
         self.all_ready  = False
         for i in self.forward_buffer:
             cv2.imshow(self.parent.wndname, i)
-            self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
+            if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
+                print("animation interrupted")
+                cv2.imshow(self.parent.wndname, self.forward_buffer[-1])
+                cv2.waitKey(1)
+                break
         if self.next_is_new:
             self.history_add_new_file(self.new_fp)
         else:
@@ -114,7 +126,11 @@ class PreRenderer(object):
         self.all_ready  = False
         for i in self.reverse_buffer:
             cv2.imshow(self.parent.wndname, i)
-            self.parent.handle_key(cv2.waitKey(FRAME_DELAY), all = False)
+            if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
+                print("animation interrupted")
+                cv2.imshow(self.parent.wndname, self.reverse_buffer[-1])
+                cv2.waitKey(1)
+                break
         self.history_roll_prev_file()
         self.parent.prerender_fade_done(self.pilimg_prev, self.pilimg_prev_small)
         if autostart:

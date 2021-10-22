@@ -16,17 +16,22 @@ class ClockDraw(object):
         self.fontpairs.append(make_font_fit("./fonts/corsiva.ttf", mainsize = 300, maxheight = 300, datescale = 0, margin = 6))
         self.cur_pos        = [0, 0, 0, 0, 0]
         self.cur_imgfp      = None
+        self.enable_ip      = False
 
     def new_img(self, imgfp):
         print("clock prep for %s" % imgfp)
         self.cur_imgfp = imgfp
         self.cur_pos = get_clock_pos(imgfp)
+        self.enable_ip = False
 
     def draw(self, img):
-        fi = self.cur_pos[3]
-        fi %= len(self.fontpairs)
-        fontpair = self.fontpairs[fi]
-        draw_clock(img, (self.cur_pos[0], self.cur_pos[1]), fontpair[0], fontpair[1], linespace = fontpair[2], placecode = self.cur_pos[2], shadowoffset = self.cur_pos[4])
+        if self.enable_ip == False:
+            fi = self.cur_pos[3]
+            fi %= len(self.fontpairs)
+            fontpair = self.fontpairs[fi]
+            draw_clock(img, (self.cur_pos[0], self.cur_pos[1]), fontpair[0], fontpair[1], linespace = fontpair[2], placecode = self.cur_pos[2], shadowoffset = self.cur_pos[4])
+        else:
+            draw_clock(img, (self.cur_pos[0], self.cur_pos[1]), self.fontpairs[0][1], None, t = myutils.get_ip_address(), placecode = self.cur_pos[2], shadowoffset = self.cur_pos[4])
 
     def save_spec(self):
         fpath = self.cur_imgfp + CLOCKPOS_FILE_SUFFIX
@@ -78,6 +83,9 @@ class ClockDraw(object):
         self.cur_pos[4] %= 16
         self.save_spec()
 
+    def toggle_ip(self):
+        self.enable_ip = not self.enable_ip
+
 def load_fonts(dirpath = "./fonts"):
     fontfiles = myutils.get_all_files("./fonts", ["*.ttf"])
     fontresults = []
@@ -114,7 +122,10 @@ def make_font_fit(fontfp, mainsize = 500, maxheight = 500, datescale = 0.3, line
 def draw_clock(img, pos, fontbig, fontsmall, linespace = 0, t = None, placecode = 7, forecolour = (255, 255, 255), border = 2, border2 = 2, bordercolour = (0, 0, 0), shadowoffset = 0, shadowcolour = (0, 0, 0)):
     if t is None:
         t = datetime.datetime.now()
-    tstr = t.strftime("%I:%M").lstrip('0')
+    if isinstance(t, str):
+        tstr = t
+    else:
+        tstr = t.strftime("%I:%M").lstrip('0')
     dstr = None
     placecode = int(placecode)
     if fontsmall is not None:
