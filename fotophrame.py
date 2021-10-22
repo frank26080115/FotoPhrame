@@ -133,7 +133,7 @@ class FotoPhrame(object):
             return False
         if interrupt:
             return True
-        if self.stay_on == False:
+        if self.stay_on == False and key != 0x71:
             self.hdmi_ctrler.poke(force = True)
         if key == 0x51:
             self.keyhdl_left()
@@ -165,6 +165,9 @@ class FotoPhrame(object):
             elif key == 0x73:
                 print("clock edit shadow")
                 self.clock_draw.change_shadow()
+        elif key == 0x71:
+            print("key-press Q")
+            self.hdmi_ctrler.force_off()
         else:
             print('key-press unknown 0x%08X' % key)
             return False
@@ -523,8 +526,8 @@ class FotoPhrame(object):
             except KeyboardInterrupt:
                 if self.fade_state == FadeState.MonitorOff:
                     print("\nwakingfrom KeyboardInterrupt")
-                    self.show_img(self.blank_img, wait = 100)
-                    hdmi_ctrl.force_on()
+                    self.show_img(self.blank_tiny, wait = 100)
+                    self.hdmi_ctrl.poke(force = True)
                     self.fade_alpha = 0
                     self.fade_state = FadeState.FadeIn
                     if self.prerenderer.wake_ready:

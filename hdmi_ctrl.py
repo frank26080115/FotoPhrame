@@ -74,8 +74,7 @@ class HdmiCtrl(object):
             self.mon_state = MonitorState.Off
             return False
         elif self.mon_state == MonitorState.OffPending and x:
-            self.mon_state = MonitorState.On
-            return True
+            return False
         elif self.mon_state == MonitorState.OffPending and not x:
             self.mon_state = MonitorState.Off
             return False
