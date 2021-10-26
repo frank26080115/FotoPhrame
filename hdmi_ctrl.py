@@ -1,7 +1,7 @@
 import subprocess, datetime
 from enum import Enum
 
-TIME_TO_SLEEP = 600
+TIME_TO_SLEEP = 300
 
 class MonitorState(Enum):
     On         = 0
@@ -16,22 +16,43 @@ class HdmiCtrl(object):
         self.time_to_sleep = time_to_sleep
         self.mon_state = MonitorState.On
         self.last_activity_time = datetime.datetime.now()
+        self.unclutter_proc = None
 
     def force_off(self):
         self.last_activity_time = datetime.datetime.now()
-        subprocess.Popen("xset dpms force standby".split())
-        self.mon_state = MonitorState.OffPending
+        try:
+            subprocess.Popen("xset dpms force standby".split())
+            self.mon_state = MonitorState.OffPending
+        except Exception as ex:
+            print("ERROR exception in hdmi_ctrl force_off: %s" % str(ex))
 
     def force_on(self):
         self.last_activity_time = datetime.datetime.now()
-        subprocess.Popen("xset dpms force on".split())
-        self.mon_state = MonitorState.OnPending
+        try:
+            subprocess.Popen("xset dpms force on".split())
+            self.mon_state = MonitorState.OnPending
+        except Exception as ex:
+            print("ERROR exception in hdmi_ctrl force_on: %s" % str(ex))
+
+    def never(self):
+        try:
+            subprocess.Popen("xset s off".split())
+            subprocess.Popen("xset -dpms".split())
+            subprocess.Popen("xset s noblank".split())
+        except Exception as ex:
+                print("ERROR exception in hdmi_ctrl never: %s" % str(ex))
 
     def set_timer(self, time_to_sleep = None):
         if time_to_sleep is not None:
             self.time_to_sleep = time_to_sleep
         #self.last_activity_time = datetime.datetime.now()
-        subprocess.Popen(("xset s %u %u" % (self.time_to_sleep, self.time_to_sleep)).split())
+        if self.time_to_sleep == 0:
+            self.never()
+        else:
+            try:
+                subprocess.Popen(("xset s %u %u" % (self.time_to_sleep, self.time_to_sleep)).split())
+            except Exception as ex:
+                print("ERROR exception in hdmi_ctrl set_timer: %s" % str(ex))
 
     def get_seconds_since(self):
         now = datetime.datetime.now()
@@ -39,21 +60,25 @@ class HdmiCtrl(object):
         return span.total_seconds()
 
     def poke(self, force = False):
-        if force or self.get_seconds_since() > (self.time_to_sleep / 2):
+        if force or self.get_seconds_since() > (max(10, self.time_to_sleep) / 2):
             self.force_on()
             self.set_timer()
             self.hide_mouse()
 
     def is_monitor_reported_on(self):
-        s = subprocess.check_output(['xset', 'q'])
-        s = str(s)
-        if len(s) <= 0:
-            print("unable to parse monitor status")
+        try:
+            s = subprocess.check_output(['xset', 'q'])
+            s = str(s)
+            if len(s) <= 0:
+                print("unable to parse monitor status")
+                return True
+            s = s.lower()
+            if "monitor is off" in s or "monitor is susp" in s:
+                return False
             return True
-        s = s.lower()
-        if "monitor is off" in s or "monitor is susp" in s:
-            return False
-        return True
+        except Exception as ex:
+            print("ERROR exception in is_monitor_reported_on: %s" % str(ex))
+            return True
 
     def is_monitor_on(self):
         x = self.is_monitor_reported_on()
@@ -81,4 +106,12 @@ class HdmiCtrl(object):
         return True
 
     def hide_mouse(self):
-        subprocess.Popen(['unclutter', '-idle', '3', '-grab'])
+        try:
+            subprocess.Popen(["xte", "'mousemove %u %u'" % (self.parent.screen_width, self.parent.screen_height)])
+        except Exception as ex:
+            print("ERROR exception in hide_mouse running xte: %s" % str(ex))
+        try:
+            if self.unclutter_proc is None:
+                self.unclutter_proc = subprocess.Popen(['unclutter', '-idle', '3', '-grab'])
+        except Exception as ex:
+            print("ERROR exception in hide_mouse running unclutter: %s" % str(ex))

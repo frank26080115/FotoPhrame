@@ -13,7 +13,10 @@ import prerender, clock_draw
 import hdmi_ctrl
 
 # time between photos
-FRAME_INTERVAL = 120
+FRAME_INTERVAL = 60
+
+# time to sleep monitor
+TIME_TO_SLEEP = 300
 
 
 FADE_ALPHA_STEP  = 1
@@ -30,9 +33,9 @@ class FadeState(Enum):
 
 class FotoPhrame(object):
 
-    def __init__(self, dirpath = './Pictures', enable_blur_border = 0.6, stay_on = False):
+    def __init__(self, dirpath = './Pictures', enable_blur_border = 0.6, stay_on = True):
         os.environ['DISPLAY'] = ":0.0" # required for launching a window out of a SSH session
-        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self)
+        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self, time_to_sleep = TIME_TO_SLEEP if stay_on else 0)
         self.hdmi_ctrler.hide_mouse()
         self.hdmi_ctrler.force_on()
         self.hdmi_ctrler.set_timer()
@@ -126,6 +129,7 @@ class FotoPhrame(object):
         self.last_key = key
         if (key & 0x7F) == 27:
             print('quit using ESC')
+            self.prerenderer.halt()
             sys.exit()
             return True
         self.prev_activity_time = datetime.datetime.now()
@@ -145,7 +149,7 @@ class FotoPhrame(object):
             print('key-press down')
             if last_key == key:
                 print("toggle IP on image")
-                self.clock_draw.toggle_ip()
+                self.clock_draw.show_ip()
         elif key == 0x65:
             print('E key, edit mode')
             if self.edit_mode == False:
@@ -344,6 +348,7 @@ class FotoPhrame(object):
         rndlim = int(round(max(5, len(allfiles)) / 3))
         print("files count %u" % len(allfiles))
         fp = None
+        retries = 0
         while fp is None:
             # pick a random file out of the list
             # check if it was recently displayed
@@ -360,8 +365,9 @@ class FotoPhrame(object):
                     repeat = True
                 i -= 1
                 j += 1
-            if not repeat:
+            if not repeat or retries > 10:
                 fp = x
+            retries += 1
         return fp
 
     def peek_prev_file(self):
@@ -527,7 +533,7 @@ class FotoPhrame(object):
                 if self.fade_state == FadeState.MonitorOff:
                     print("\nwakingfrom KeyboardInterrupt")
                     self.show_img(self.blank_tiny, wait = 100)
-                    self.hdmi_ctrl.poke(force = True)
+                    self.hdmi_ctrler.poke(force = True)
                     self.fade_alpha = 0
                     self.fade_state = FadeState.FadeIn
                     if self.prerenderer.wake_ready:
@@ -537,6 +543,7 @@ class FotoPhrame(object):
                         print("slow-render wake")
                 else:
                     print("\nquitting from KeyboardInterrupt")
+                    self.prerenderer.halt()
                     sys.exit()
 
 root = None

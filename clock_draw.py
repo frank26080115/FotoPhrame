@@ -16,7 +16,7 @@ class ClockDraw(object):
         self.fontpairs.append(make_font_fit("./fonts/corsiva.ttf", mainsize = 300, maxheight = 300, datescale = 0, margin = 6))
         self.cur_pos        = [0, 0, 0, 0, 0]
         self.cur_imgfp      = None
-        self.enable_ip      = False
+        self.enable_ip_time = None
 
     def new_img(self, imgfp):
         print("clock prep for %s" % imgfp)
@@ -25,7 +25,12 @@ class ClockDraw(object):
         self.enable_ip = False
 
     def draw(self, img):
-        if self.enable_ip == False:
+        enable_ip = False
+        if self.enable_ip_time is not None:
+            span = datetime.datetime.now() - self.enable_ip_time
+            if span.total_seconds() < 5:
+                enable_ip = True
+        if enable_ip == False:
             fi = self.cur_pos[3]
             fi %= len(self.fontpairs)
             fontpair = self.fontpairs[fi]
@@ -83,8 +88,8 @@ class ClockDraw(object):
         self.cur_pos[4] %= 16
         self.save_spec()
 
-    def toggle_ip(self):
-        self.enable_ip = not self.enable_ip
+    def show_ip(self):
+        self.enable_ip_time = datetime.datetime.now()
 
 def load_fonts(dirpath = "./fonts"):
     fontfiles = myutils.get_all_files("./fonts", ["*.ttf"])
