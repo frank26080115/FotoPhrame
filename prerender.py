@@ -2,6 +2,7 @@ import sys, os, io, gc, random, time, datetime, subprocess, glob
 from enum import Enum
 import threading
 
+import pi3d
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -71,11 +72,10 @@ class PreRenderer(object):
 
     def show_wake(self):
         for i in self.wake_buffer:
-            cv2.imshow(self.parent.wndname, i)
+            self.parent.show_img(img = i, wait = 0)
             if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
                 print("animation interrupted")
-                cv2.imshow(self.parent.wndname, self.wake_buffer[-1])
-                cv2.waitKey(1)
+                self.parent.show_img(img = self.wake_buffer[-1], wait = 0)
                 break
         self.parent.prerender_fade_done(self.pilimg_this, self.pilimg_this_small)
 
@@ -86,11 +86,10 @@ class PreRenderer(object):
         self.wake_ready = False
         self.all_ready  = False
         for i in self.future_buffer:
-            cv2.imshow(self.parent.wndname, i)
+            self.parent.show_img(img = i, wait = 0)
             if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
                 print("animation interrupted")
-                cv2.imshow(self.parent.wndname, self.future_buffer[-1])
-                cv2.waitKey(1)
+                self.parent.show_img(img = self.future_buffer[-1], wait = 0)
                 break
         self.history_add_new_file(self.new_fp)
         self.parent.prerender_fade_done(self.pilimg_new, self.pilimg_new_small)
@@ -104,11 +103,10 @@ class PreRenderer(object):
         self.wake_ready = False
         self.all_ready  = False
         for i in self.forward_buffer:
-            cv2.imshow(self.parent.wndname, i)
+            self.parent.show_img(img = i, wait = 0)
             if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
                 print("animation interrupted")
-                cv2.imshow(self.parent.wndname, self.forward_buffer[-1])
-                cv2.waitKey(1)
+                self.parent.show_img(img = self.forward_buffer[-1], wait = 0)
                 break
         if self.next_is_new:
             self.history_add_new_file(self.new_fp)
@@ -125,11 +123,10 @@ class PreRenderer(object):
         self.wake_ready = False
         self.all_ready  = False
         for i in self.reverse_buffer:
-            cv2.imshow(self.parent.wndname, i)
+            self.parent.show_img(img = i, wait = 0)
             if self.parent.handle_key(cv2.waitKey(FRAME_DELAY), interrupt = True):
                 print("animation interrupted")
-                cv2.imshow(self.parent.wndname, self.reverse_buffer[-1])
-                cv2.waitKey(1)
+                self.parent.show_img(img = self.reverse_buffer[-1], wait = 0)
                 break
         self.history_roll_prev_file()
         self.parent.prerender_fade_done(self.pilimg_prev, self.pilimg_prev_small)
@@ -149,8 +146,8 @@ class PreRenderer(object):
             else:
                 res = Image.blend(img1_small, img2_small, alpha=alpha)
                 #res = Image.blend(img1_big, img2_big, alpha=alpha)
-            res = cv2.cvtColor(np.array(res, dtype=np.uint8), cv2.COLOR_RGBA2BGR)
-            buff.append(res)
+            tex = pi3d.Texture(res, blend=True, automatic_resize=True, free_after_load=True)
+            buff.append(tex)
             alpha += ALPHA_STEP
         return buff
 
@@ -232,7 +229,7 @@ class PreRenderer(object):
             for i in self.future_buffer:
                 if self.stop_event.is_set():
                     return
-                self.forward_buffer.append(i.copy())
+                self.forward_buffer.append(i)
             if self.stop_event.is_set():
                 print("pre-renderer got halt signal", flush=True)
                 return

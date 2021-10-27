@@ -3,7 +3,9 @@
 import sys, os, io, gc, random, time, datetime, subprocess, glob
 from enum import Enum
 
+import pi3d
 import cv2
+from pi3d.Keyboard import x11Keyboard, CursesKeyboard
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from screeninfo import get_monitors
@@ -35,30 +37,31 @@ class FotoPhrame(object):
 
     def __init__(self, dirpath = './Pictures', enable_blur_border = 0.6, stay_on = True):
         os.environ['DISPLAY'] = ":0.0" # required for launching a window out of a SSH session
-        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self, time_to_sleep = TIME_TO_SLEEP if stay_on else 0)
-        self.hdmi_ctrler.hide_mouse()
-        self.hdmi_ctrler.force_on()
-        self.hdmi_ctrler.set_timer()
         screen = get_monitors()[0]
         self.screen_width  = screen.width
         self.screen_height = screen.height
+        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self, time_to_sleep = TIME_TO_SLEEP if stay_on else 0)
+        self.hdmi_ctrler.force_on()
+        self.hdmi_ctrler.set_timer()
+        self.hdmi_ctrler.hide_mouse()
         self.screen_aspect = float(self.screen_width) / float(self.screen_height)
         print("window %u x %u aspect %.4f" % (self.screen_width, self.screen_height, self.screen_aspect))
         self.regen_blanks()
-        self.wndname = 'frame'
-        cv2.namedWindow      (self.wndname, cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty(self.wndname, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-        cv2.imshow           (self.wndname, np.array(self.blank_img))
-        #cv2.setWindowProperty(self.wndname, cv2.WND_PROP_TOPMOST, 1) # the version of OpenCV I have doesn't support this
-        cv2.waitKey(1)
-        print("window launched")
+        self.last_key = 0
+
+        self.pi3d_display  = pi3d.Display.create(x=0, y=0, w=self.screen_width, h=self.screen_height, frames_per_second=60, display_config=pi3d.DISPLAY_CONFIG_HIDE_CURSOR, background=(0, 0, 0, 1), use_glx=True)
+        self.pi3d_camera   = pi3d.Camera(is_3d=False)
+        self.pi3d_shader   = pi3d.Shader("uv_flat")
+        self.pi3d_display.loop_running()
+        #self.keyboard      = myutils.BgKeyboard(self, pi3d.Keyboard())
+        self.keyboard      = pi3d.Keyboard()#x11Keyboard()
+        self.show_img()
 
         self.dirpath = dirpath
         self.enable_blur_border = enable_blur_border
         self.stay_on = stay_on
 
         self.edit_mode  = False
-        self.last_key   = 0
         self.fade_state = FadeState.Idle
         self.fade_alpha = 0
         self.prev_frame_time = datetime.datetime.now()
@@ -75,7 +78,7 @@ class FotoPhrame(object):
         print("waiting for pre-renderer to generate first fade, while clock fonts are loading")
         self.clock_draw = clock_draw.ClockDraw(self)
         while not self.prerenderer.all_ready:
-            self.handle_key(cv2.waitKey(1), all = False)
+            self.handle_key(self.keyboard.read(), all = False)
         self.prerenderer.show_new()
         print("init complete")
 
@@ -118,21 +121,36 @@ class FotoPhrame(object):
                 self.fade_alpha = 0
                 self.fade_state = FadeState.FadeIn
 
+    def handle_key_filter(self, key):
+        last_key = self.last_key
+        self.last_key = key
+        now = datetime.datetime.now()
+        if key == last_key:
+            span = now - self.last_key_time
+            if span.total_seconds() > 0.3:
+                return key
+            else:
+                self.last_key_time = now
+                return -1
+        else:
+            self.last_key_time = now
+            return key
+
     def handle_key(self, key, all = True, interrupt = False):
+        key = self.handle_key_filter(key)
         if key is None:
             return False
         if key == -1:
             return False
         if key == 0xFF:
             return False
-        last_key = self.last_key
-        self.last_key = key
         if (key & 0x7F) == 27:
             print('quit using ESC')
             self.prerenderer.halt()
             sys.exit()
             return True
-        self.prev_activity_time = datetime.datetime.now()
+        now = datetime.datetime.now()
+        self.prev_activity_time = now
         if not all:
             return False
         if interrupt:
@@ -147,13 +165,13 @@ class FotoPhrame(object):
             self.keyhdl_up()
         elif key == 0x54:
             print('key-press down')
-            if last_key == key:
-                print("toggle IP on image")
-                self.clock_draw.show_ip()
+            print("toggle IP on image")
+            self.clock_draw.show_ip()
         elif key == 0x65:
             print('E key, edit mode')
             if self.edit_mode == False:
-                cv2.setMouseCallback(self.wndname, mouse_clicked)
+                #cv2.setMouseCallback(self.wndname, mouse_clicked)
+                pass
             self.edit_mode = True
         elif (key == 0x2D or key == 0x2B or key == 0x66 or key == 0x73) and self.edit_mode:
             self.prev_frame_time = datetime.datetime.now()
@@ -224,50 +242,29 @@ class FotoPhrame(object):
         if img is None:
             img = self.blank_img.copy()
         if 'PIL' in str(type(img)):
-            try:
-                nimg = np.array(img)
-            except MemoryError:
-                print("MemoryError in show_img")
-                gc.collect()
-                self.regen_blanks()
-                nimg = self.blank_tiny
-            img = cv2.cvtColor(nimg, cv2.COLOR_RGBA2BGR)
-        if alpha is not None:
-            if alpha >= FADE_ALPHA_LIMIT:
-                alpha = 1
-            else:
-                alpha = FADE_ALPHA_LIMIT - alpha
-            if alpha > 1:
-                img = cv2.divide(img, (alpha, alpha, alpha, alpha))
-            elif alpha == 0:
-                img = self.blank_tiny
-        cv2.imshow(self.wndname, img)
-        self.handle_key(cv2.waitKey(wait))
-
-    def get_faded_img(self, img = None, alpha = None):
-        if alpha is None:
-            alpha = self.fade_alpha
-        alpha = int(round(alpha))
-        if img is None:
-            img = self.img_small
-        if 'PIL' in str(type(img)):
-            try:
-                nimg = np.array(img)
-            except MemoryError:
-                print("MemoryError in get_faded_img")
-                gc.collect()
-                self.regen_blanks()
-                nimg = self.blank_tiny
-        img = cv2.cvtColor(nimg, cv2.COLOR_RGBA2BGR)
-        if alpha >= FADE_ALPHA_LIMIT:
-            alpha = 1
+            texture = pi3d.Texture(img, blend=True, automatic_resize=True, free_after_load=True)
+        elif 'texture' in str(type(img)).lower():
+            texture = img
+        #self.pi3d_display.loop_running()
+        if 'sprite' in str(type(img)).lower():
+            self.pi3d_slide = img
         else:
-            alpha = FADE_ALPHA_LIMIT - alpha
-        if alpha > 1:
-            img = cv2.divide(img, (alpha, alpha, alpha, alpha))
-        elif alpha == 0:
-            img = self.blank_tiny
-        return img
+            self.pi3d_slide = pi3d.ImageSprite(texture, shader=self.pi3d_shader, camera=self.pi3d_camera, w=self.screen_width, h=self.screen_height, z=5.0)
+        if alpha is not None:
+            alpha = float(alpha) / float(FADE_ALPHA_LIMIT)
+            self.pi3d_slide.set_alpha(alpha)
+        else:
+            self.pi3d_slide.set_alpha(1.0)
+        self.pi3d_slide.draw()
+        self.pi3d_display.loop_running()
+        self.pi3d_slide.draw()
+        if wait > 0:
+            self.handle_key(self.keyboard.read())
+            t = datetime.datetime.now()
+            while ((datetime.datetime.now() - t).total_seconds() * 1000) < wait and self.pi3d_display.loop_running():
+                self.pi3d_slide.draw()
+                self.handle_key(self.keyboard.read())
+                #time.sleep(0.001)
 
     def draw_clock(self, img = None):
         if img is None:
@@ -450,8 +447,7 @@ class FotoPhrame(object):
             if self.img is not None and not self.is_blank:
                 if self.fade_alpha <= FADE_ALPHA_LIMIT:
                     self.fade_alpha += FADE_ALPHA_STEP
-                    faded_img = self.get_faded_img()
-                    self.show_img(faded_img)
+                    self.show_img(alpha = self.fade_alpha)
                     if self.fade_alpha >= FADE_ALPHA_LIMIT:
                         print("finished fade in")
                         self.fade_state = FadeState.Idle
@@ -470,8 +466,7 @@ class FotoPhrame(object):
             if self.img is not None and not self.is_blank:
                 if self.fade_alpha <= FADE_ALPHA_LIMIT:
                     self.fade_alpha -= FADE_ALPHA_STEP
-                    faded_img = self.get_faded_img()
-                    self.show_img(faded_img)
+                    self.show_img(alpha = self.fade_alpha)
                 else:
                     print("skipped fade out")
                     self.fade_alpha = 0
@@ -550,9 +545,10 @@ root = None
 
 def mouse_clicked(event, x, y, flags, param):
     global root
-    if event == cv2.EVENT_LBUTTONDBLCLK:
-        print("dbl-click event (%u , %u)" % (x, y))
-        root.clock_draw.change_xy(x, y)
+    #if event == cv2.EVENT_LBUTTONDBLCLK:
+    #    print("dbl-click event (%u , %u)" % (x, y))
+    #    root.clock_draw.change_xy(x, y)
+    pass
 
 def main():
     global root
