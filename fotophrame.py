@@ -35,14 +35,14 @@ class FotoPhrame(object):
 
     def __init__(self, dirpath = './Pictures', enable_blur_border = 0.6, stay_on = True):
         os.environ['DISPLAY'] = ":0.0" # required for launching a window out of a SSH session
-        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self, time_to_sleep = TIME_TO_SLEEP if stay_on else 0)
-        self.hdmi_ctrler.hide_mouse()
-        self.hdmi_ctrler.force_on()
-        self.hdmi_ctrler.set_timer()
         screen = get_monitors()[0]
         self.screen_width  = screen.width
         self.screen_height = screen.height
         self.screen_aspect = float(self.screen_width) / float(self.screen_height)
+        self.hdmi_ctrler = hdmi_ctrl.HdmiCtrl(self, time_to_sleep = TIME_TO_SLEEP if not stay_on else 0)
+        self.hdmi_ctrler.hide_mouse()
+        self.hdmi_ctrler.force_on()
+        self.hdmi_ctrler.set_timer()
         print("window %u x %u aspect %.4f" % (self.screen_width, self.screen_height, self.screen_aspect))
         self.regen_blanks()
         self.wndname = 'frame'

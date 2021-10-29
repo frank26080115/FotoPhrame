@@ -40,7 +40,7 @@ class HdmiCtrl(object):
             subprocess.Popen("xset -dpms".split())
             subprocess.Popen("xset s noblank".split())
         except Exception as ex:
-                print("ERROR exception in hdmi_ctrl never: %s" % str(ex))
+            print("ERROR exception in hdmi_ctrl never: %s" % str(ex))
 
     def set_timer(self, time_to_sleep = None):
         if time_to_sleep is not None:
@@ -107,7 +107,7 @@ class HdmiCtrl(object):
 
     def hide_mouse(self):
         try:
-            subprocess.Popen(["xte", "'mousemove %u %u'" % (self.parent.screen_width, self.parent.screen_height)])
+            subprocess.Popen(["xte", "mousemove %u %u" % (self.parent.screen_width, self.parent.screen_height)])
         except Exception as ex:
             print("ERROR exception in hide_mouse running xte: %s" % str(ex))
         try:
