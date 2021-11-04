@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from screeninfo import get_monitors
 
 import myutils
-import prerender, clock_draw
+import prerender, clock_draw, colour_correction
 import hdmi_ctrl
 
 # time between photos
@@ -169,6 +169,9 @@ class FotoPhrame(object):
             elif key == 0x73:
                 print("clock edit shadow")
                 self.clock_draw.change_shadow()
+        elif key == 0x74 and self.edit_mode:
+            print("opening text editor for colour correction")
+            colour_correction.open_editor(self.curr_file_path())
         elif key == 0x71:
             print("key-press Q")
             self.hdmi_ctrler.force_off()
@@ -279,14 +282,17 @@ class FotoPhrame(object):
     def load_img_file(self, fp):
         bg = self.blank_img.copy()
         if fp is None:
-            return bg, False
+            return bg, self.blank_img_small, False
         try:
             img = Image.open(fp)
         except Exception as ex:
             self.error_report(ex, txt = 'trying to open ' + fp)
-            return bg, False
+            return bg, self.blank_img_small, False
         img_aspect = float(img.width) / float(img.height);
         print('img open "%s" (%u , %u , %.4f)' % (fp, img.width, img.height, img_aspect))
+
+        img = colour_correction.image_correct(img, fp)
+
         # resize image to fit the screen while respecting aspect ratio
         # I am avoiding the usage of the thumbnail function
         if img_aspect >= self.screen_aspect:
